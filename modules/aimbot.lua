@@ -1,17 +1,25 @@
 return function(ctx)
-    local Services    = ctx.Services
-    local Flags       = ctx.Flags
+    -- Pastikan semua dependencies ada, jika tidak beri nilai default agar tidak error
+    local Services    = ctx.Services or {
+        Players = game:GetService("Players"),
+        Workspace = game:GetService("Workspace"),
+        RunService = game:GetService("RunService")
+    }
+    local Flags       = ctx.Flags or { aimbotEnabled = true, aimbotFOV = 150, aimbotSmoothing = 0.1, prediction = 0.12 }
     local CharUtils   = ctx.CharUtils
-    local clamp       = ctx.Utils.clamp
     local LocalPlayer = Services.Players.LocalPlayer
     local Camera      = Services.Workspace.CurrentCamera
 
     local AimbotModule = {}
 
-    -- Variable untuk menyimpan target terakhir agar transisi tidak 'lompat-lompat'
-    local lastTarget = nil
+    -- Update kamera secara berkala jika terjadi perubahan di workspace
+    Services.Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+        Camera = Services.Workspace.CurrentCamera
+    end)
 
     function AimbotModule.getClosestTarget()
+        if not Flags.aimbotEnabled then return nil end
+        
         local vpSize = Camera.ViewportSize
         local screenCenter = Vector2.new(vpSize.X * 0.5, vpSize.Y * 0.5)
         
@@ -21,59 +29,58 @@ return function(ctx)
 
         for _, plr in ipairs(Services.Players:GetPlayers()) do
             if plr ~= LocalPlayer then
-                -- Validasi Team & Nyawa
-                local isEnemy = not Flags.aimbotTeamCheck or (plr.Team ~= LocalPlayer.Team)
-                local isAlive = not Flags.aimbotAliveCheck or CharUtils.isAlive(plr.Character)
+                -- Validasi Team
+                local teamCheckPassed = true
+                if Flags.aimbotTeamCheck and plr.Team == LocalPlayer.Team then
+                    teamCheckPassed = false
+                end
 
-                if isEnemy and isAlive and plr.Character then
-                    local pos, part = CharUtils.resolveTargetPosition(plr.Character, Flags.aimbotLockPart)
-                    
-                    if pos then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+                if teamCheckPassed then
+                    local char = plr.Character
+                    if char and CharUtils.isAlive(char) then
+                        -- Ambil posisi part (Head/HumanoidRootPart)
+                        local pos, part = CharUtils.resolveTargetPosition(char, Flags.aimbotLockPart or "Head")
                         
-                        if onScreen then
-                            local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-                            if dist < shortest then
-                                shortest = dist
-                                best = { 
-                                    player = plr, 
-                                    position = pos, 
-                                    part = part, 
-                                    distanceFromCenter = dist 
-                                }
+                        if pos and part then
+                            -- Konversi posisi dunia ke posisi layar (Viewport)
+                            local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+                            
+                            if onScreen then
+                                local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                                if dist < shortest then
+                                    shortest = dist
+                                    best = { 
+                                        player = plr, 
+                                        position = pos, 
+                                        part = part 
+                                    }
+                                end
                             end
                         end
                     end
                 end
             end
         end
-        
-        lastTarget = best
         return best
     end
 
-    -- Prediksi posisi yang lebih mulus (Velocity Scaling)
-    function AimbotModule.predictPosition(target)
+    -- Fungsi Prediksi Posisi (Penting agar tembakan tidak ketinggalan)
+    function AimbotModule.getPredictedPosition(target)
         if not target or not target.part then return nil end
-        
         local velocity = CharUtils.getVelocity(target.part)
-        -- Mengalikan prediksi dengan angka kecil agar tidak 'over-shooting' saat musuh lag
-        local predictionStrength = Flags.prediction or 0.12
-        
-        return target.part.Position + (velocity * predictionStrength)
+        return target.part.Position + (velocity * (Flags.prediction or 0.12))
     end
 
-    -- KUNCI STABILITAS: Smoothing Function
-    -- Gunakan fungsi ini untuk menghitung CFrame kamera yang baru
-    function AimbotModule.calculateSmoothCFrame(targetPos, deltaTime)
+    -- Fungsi eksekusi pergerakan kamera
+    function AimbotModule.aimAt(targetPos, smoothness)
+        if not targetPos then return end
+        
         local currentCF = Camera.CFrame
         local targetCF = CFrame.new(currentCF.Position, targetPos)
         
-        -- Smoothing berdasarkan DeltaTime agar stabil di FPS berapapun
-        -- Jika Flags.smoothing tidak ada, default ke 5 (semakin tinggi semakin lambat/halus)
-        local lerpFactor = clamp(deltaTime * (Flags.aimbotSmoothingSpeed or 5), 0, 1)
-        
-        return currentCF:Lerp(targetCF, lerpFactor)
+        -- Smoothness: 1 = Instan, 0.01 = Sangat Lambat
+        local s = ctx.Utils.clamp(1 - (smoothness or Flags.aimbotSmoothing or 0.05), 0.01, 1)
+        Camera.CFrame = currentCF:Lerp(targetCF, s)
     end
 
     return AimbotModule
