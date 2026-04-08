@@ -4,11 +4,9 @@ return function(ctx)
     local CharUtils  = ctx.CharUtils
     local clamp      = ctx.Utils.clamp
     local LocalPlayer = Services.Players.LocalPlayer
-    local RunService  = Services.RunService
 
     local AimbotModule = {}
 
-    -- Fungsi untuk mencari target (Logika Anda yang sudah berfungsi)
     function AimbotModule.getClosestTarget()
         local cam = Services.Workspace.CurrentCamera
         if not cam then return nil end
@@ -43,30 +41,9 @@ return function(ctx)
         return best
     end
 
-    -- Prediksi yang lebih stabil
     function AimbotModule.predictPosition(part)
         if not part then return nil end
-        local velocity = CharUtils.getVelocity(part)
-        local predictionValue = Flags.prediction or 0.12
-        return part.Position + (velocity * predictionValue)
-    end
-
-    -- FUNGSI BARU: Menggerakkan kamera dengan stabil (Lerp)
-    function AimbotModule.applySmoothing(targetPos, deltaTime)
-        local cam = Services.Workspace.CurrentCamera
-        if not cam or not targetPos then return end
-
-        local currentCFrame = cam.CFrame
-        local lookAtTarget = CFrame.new(currentCFrame.Position, targetPos)
-        
-        -- Semakin besar smoothing, semakin lambat pergerakannya (lebih stabil)
-        -- Jika Flags.smoothing tidak ada, default ke 0.1
-        local smoothAmount = Flags.aimbotSmoothing or 0.1
-        
-        -- Kita gunakan deltaTime agar kecepatan gerak sama di semua FPS
-        local alpha = clamp(deltaTime * (1 / smoothAmount), 0, 1)
-        
-        cam.CFrame = currentCFrame:Lerp(lookAtTarget, alpha)
+        return part.Position + CharUtils.getVelocity(part) * (Flags.prediction or 0.12)
     end
 
     return AimbotModule
